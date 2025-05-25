@@ -16,26 +16,27 @@ import json
 SPREADSHEET_ID = '1NTScbiIna-iE7roQ9XBdjUOssRihTFFby4INAAQNXTg'
 WORKSHEET_NAME = 'Vendas'
 
-# Tema escuro personalizado
+# Tema escuro elegante
 DARK_THEME = {
-    'background': '#1a1a1a',
-    'surface': '#2d2d2d',
+    'background': '#0f1419',
+    'surface': '#1a1f2e',
+    'card_bg': '#252d3d',
     'primary': '#00d4aa',
     'secondary': '#ff6b6b',
     'accent': '#ffd43b',
     'text': '#ffffff',
-    'text_secondary': '#b0b0b0',
+    'text_secondary': '#8892b0',
     'success': '#51cf66',
     'warning': '#ffd43b',
     'danger': '#ff6b6b',
-    'card_bg': '#2a2a2a'
+    'gradient': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
 }
 
 # Define ordem dos dias e meses
 dias_semana_ordem = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
 meses_ordem = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 
-# --- Funções de Autenticação (CORRIGIDA) ---
+# --- Funções de Autenticação ---
 def get_google_auth():
     """Autoriza o acesso ao Google Sheets usando variável de ambiente ou arquivo JSON."""
     SCOPES = ['https://www.googleapis.com/auth/spreadsheets',
@@ -98,9 +99,8 @@ def read_sales_data():
                 else:
                     df[col] = 0
             
-            # Processa datas - CORRIGIDO
+            # Processa datas
             if 'Data' in df.columns:
-                # Tenta múltiplos formatos de data
                 df['Data'] = pd.to_datetime(df['Data'], format='%d/%m/%Y', errors='coerce')
                 if df['Data'].isnull().all():
                     df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
@@ -133,7 +133,7 @@ def add_data_to_sheet(date_str, cartao, dinheiro, pix):
         return False, f"Erro ao adicionar dados: {e}"
 
 def process_data(df_input):
-    """Processa dados para análise - CORRIGIDO."""
+    """Processa dados para análise."""
     if df_input is None or df_input.empty:
         return pd.DataFrame(columns=['Data', 'Cartão', 'Dinheiro', 'Pix', 'Total', 'Ano', 'Mês', 'MêsNome', 'DiaSemana'])
 
@@ -148,14 +148,12 @@ def process_data(df_input):
 
     df['Total'] = df['Cartão'] + df['Dinheiro'] + df['Pix']
 
-    # Processa informações de data - CORRIGIDO
+    # Processa informações de data
     if 'Data' in df.columns and not df['Data'].isnull().all():
         try:
-            # Garante que Data é datetime
             if not pd.api.types.is_datetime64_any_dtype(df['Data']):
                 df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
             
-            # Remove linhas com datas inválidas
             df = df.dropna(subset=['Data']).copy()
             
             if not df.empty:
@@ -166,20 +164,19 @@ def process_data(df_input):
                 day_map = {0: "Segunda-feira", 1: "Terça-feira", 2: "Quarta-feira", 3: "Quinta-feira", 4: "Sexta-feira", 5: "Sábado", 6: "Domingo"}
                 df['DiaSemana'] = df['Data'].dt.dayofweek.map(day_map)
                 df['DataFormatada'] = df['Data'].dt.strftime('%d/%m/%Y')
+                df['AnoMês'] = df['Data'].dt.strftime('%Y-%m')
+                df['DiaDoMes'] = df['Data'].dt.day
                 
                 # Categorias ordenadas
                 df['DiaSemana'] = pd.Categorical(df['DiaSemana'], categories=dias_semana_ordem, ordered=True)
                 df['MêsNome'] = pd.Categorical(df['MêsNome'], categories=meses_ordem, ordered=True)
         except Exception as e:
             print(f"❌ Erro ao processar datas: {e}")
-            # Adiciona colunas vazias se falhar
-            for col in ['Ano', 'Mês', 'MêsNome', 'DiaSemana', 'DataFormatada']:
-                df[col] = None
     
     return df
 
 def filter_by_rolling_days(df, dias_selecionados):
-    """Filtra DataFrame para últimos N dias - CORRIGIDO."""
+    """Filtra DataFrame para últimos N dias."""
     if df.empty or not dias_selecionados or 'Data' not in df.columns:
         return df
     
@@ -230,6 +227,30 @@ def calculate_financial_results(df, salario_minimo, custo_contadora, custo_forne
 def format_brl(value):
     """Formata valores em moeda brasileira."""
     return f"R$ {value:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+def analyze_sales_by_weekday(df):
+    """Analisa vendas por dia da semana."""
+    if df.empty or 'DiaSemana' not in df.columns or 'Total' not in df.columns:
+        return None, None
+    
+    try:
+        df_copy = df.copy()
+        df_copy['Total'] = pd.to_numeric(df_copy['Total'], errors='coerce')
+        df_copy.dropna(subset=['Total', 'DiaSemana'], inplace=True)
+        
+        if df_copy.empty:
+            return None, None
+        
+        avg_sales_weekday = df_copy.groupby('DiaSemana', observed=False)['Total'].mean().reindex(dias_semana_ordem).dropna()
+        
+        if not avg_sales_weekday.empty:
+            best_day = avg_sales_weekday.idxmax()
+            return best_day, avg_sales_weekday
+        else:
+            return None, avg_sales_weekday
+    except Exception as e:
+        print(f"❌ Erro ao analisar vendas por dia da semana: {e}")
+        return None, None
 
 # --- Funções para Gráficos ---
 def create_daily_sales_chart(df):
@@ -299,7 +320,6 @@ def create_weekly_pattern_chart(df):
     if df.empty or 'DiaSemana' not in df.columns:
         return go.Figure()
     
-    # Filtra apenas dados válidos
     df_valid = df[df['DiaSemana'].notna() & (df['Total'] > 0)].copy()
     
     if df_valid.empty:
@@ -325,43 +345,188 @@ def create_weekly_pattern_chart(df):
     
     return fig
 
+def create_accumulation_chart(df):
+    """Gráfico de acumulação estilo montanha."""
+    if df.empty or 'Data' not in df.columns:
+        return go.Figure()
+    
+    df_sorted = df.sort_values('Data').copy()
+    df_sorted['Total_Acumulado'] = df_sorted['Total'].cumsum()
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=df_sorted['Data'],
+        y=df_sorted['Total_Acumulado'],
+        mode='lines',
+        fill='tonexty',
+        name='Capital Acumulado',
+        line=dict(color=DARK_THEME['primary'], width=3),
+        fillcolor=f"rgba(0, 212, 170, 0.3)"
+    ))
+    
+    fig.update_layout(
+        title='💰 Evolução do Capital Acumulado',
+        plot_bgcolor=DARK_THEME['background'],
+        paper_bgcolor=DARK_THEME['surface'],
+        font_color=DARK_THEME['text'],
+        title_font_size=18,
+        xaxis=dict(gridcolor='#404040', title='Data'),
+        yaxis=dict(gridcolor='#404040', title='Capital (R$)', tickformat=',.0f')
+    )
+    
+    return fig
+
+def create_payment_evolution_chart(df):
+    """Gráfico de evolução dos métodos de pagamento."""
+    if df.empty or 'AnoMês' not in df.columns:
+        return go.Figure()
+    
+    df_chart = df.sort_values('AnoMês')
+    monthly_payments = df_chart.groupby('AnoMês')[['Cartão', 'Dinheiro', 'Pix']].sum().reset_index()
+    
+    fig = go.Figure()
+    
+    for method in ['Cartão', 'Dinheiro', 'Pix']:
+        fig.add_trace(go.Scatter(
+            x=monthly_payments['AnoMês'],
+            y=monthly_payments[method],
+            mode='lines+markers',
+            name=method,
+            stackgroup='one'
+        ))
+    
+    fig.update_layout(
+        title='📈 Evolução dos Métodos de Pagamento',
+        plot_bgcolor=DARK_THEME['background'],
+        paper_bgcolor=DARK_THEME['surface'],
+        font_color=DARK_THEME['text'],
+        title_font_size=18,
+        xaxis=dict(gridcolor='#404040', title='Período'),
+        yaxis=dict(gridcolor='#404040', title='Valor (R$)', tickformat=',.0f')
+    )
+    
+    return fig
+
+def create_sales_histogram(df):
+    """Histograma de distribuição de vendas."""
+    if df.empty or 'Total' not in df.columns:
+        return go.Figure()
+    
+    df_filtered = df[df['Total'] > 0]
+    
+    if df_filtered.empty:
+        return go.Figure()
+    
+    fig = px.histogram(df_filtered, x='Total', nbins=20,
+                       title='📊 Distribuição dos Valores de Venda',
+                       color_discrete_sequence=[DARK_THEME['accent']])
+    
+    fig.update_layout(
+        plot_bgcolor=DARK_THEME['background'],
+        paper_bgcolor=DARK_THEME['surface'],
+        font_color=DARK_THEME['text'],
+        title_font_size=18,
+        xaxis=dict(gridcolor='#404040', title='Valor da Venda (R$)'),
+        yaxis=dict(gridcolor='#404040', title='Frequência')
+    )
+    
+    return fig
+
 # --- Inicialização do App ---
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG], suppress_callback_exceptions=True)
 server = app.server
 
-# CSS customizado para modo escuro
+# CSS customizado
 custom_css = {
     'backgroundColor': DARK_THEME['background'],
     'color': DARK_THEME['text'],
-    'minHeight': '100vh'
+    'minHeight': '100vh',
+    'fontFamily': "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
 }
 
 # --- Layout Principal ---
 app.layout = dbc.Container([
     dcc.Store(id='store-sales-data'),
     dcc.Store(id='store-filtered-data'),
-    dcc.Interval(id='interval-component', interval=60*1000, n_intervals=0),  # Atualiza a cada 60s
+    dcc.Interval(id='interval-component', interval=60*1000, n_intervals=0),
     
-    # Header
+    # Header com logo
     dbc.Row([
         dbc.Col([
             html.Div([
-                html.H1("🍔 SISTEMA FINANCEIRO - CLIP'S BURGER", 
-                       className="text-center mb-2", 
-                       style={'color': DARK_THEME['primary'], 'fontWeight': 'bold', 'fontSize': '2.5rem'}),
-                html.P("Gestão inteligente de vendas com análise financeira em tempo real", 
-                      className="text-center", 
-                      style={'color': DARK_THEME['text_secondary'], 'fontSize': '1.2rem'})
-            ])
+                dbc.Row([
+                    dbc.Col([
+                        html.Img(
+                            src=app.get_asset_url('logo.png'),
+                            height="80px",
+                            style={
+                                'marginRight': '20px',
+                                'filter': 'drop-shadow(0 4px 8px rgba(0, 212, 170, 0.3))'
+                            }
+                        ) if os.path.exists('assets/logo.png') else html.Div("🍔", style={'fontSize': '60px', 'marginRight': '20px'})
+                    ], width="auto", className="d-flex align-items-center"),
+                    dbc.Col([
+                        html.H1("SISTEMA FINANCEIRO", 
+                               style={
+                                   'color': DARK_THEME['text'], 
+                                   'fontWeight': 'bold', 
+                                   'fontSize': '2.5rem',
+                                   'marginBottom': '0',
+                                   'textShadow': '2px 2px 4px rgba(0,0,0,0.5)'
+                               }),
+                        html.H2("CLIP'S BURGER", 
+                               style={
+                                   'color': DARK_THEME['primary'], 
+                                   'fontWeight': 'bold', 
+                                   'fontSize': '2rem',
+                                   'marginBottom': '5px',
+                                   'textShadow': '2px 2px 4px rgba(0,0,0,0.5)'
+                               }),
+                        html.P("Gestão inteligente de vendas com análise financeira em tempo real", 
+                              style={
+                                  'color': DARK_THEME['text_secondary'], 
+                                  'fontSize': '1.1rem',
+                                  'marginBottom': '0'
+                              })
+                    ], className="d-flex flex-column justify-content-center")
+                ], className="align-items-center")
+            ], style={
+                'background': DARK_THEME['gradient'],
+                'padding': '20px',
+                'borderRadius': '15px',
+                'boxShadow': '0 8px 32px rgba(0, 212, 170, 0.2)',
+                'border': f'1px solid {DARK_THEME["primary"]}40'
+            })
         ], width=12)
     ], className="mb-4 mt-3"),
     
     # Tabs principais
     dbc.Tabs([
-        dbc.Tab(label="📝 Registrar Venda", tab_id="tab-registro", active_tab_style={'backgroundColor': DARK_THEME['primary']}),
-        dbc.Tab(label="📈 Análise Detalhada", tab_id="tab-analise", active_tab_style={'backgroundColor': DARK_THEME['primary']}),
-        dbc.Tab(label="💡 Estatísticas", tab_id="tab-estatisticas", active_tab_style={'backgroundColor': DARK_THEME['primary']}),
-        dbc.Tab(label="💰 Análise Contábil", tab_id="tab-contabil", active_tab_style={'backgroundColor': DARK_THEME['primary']})
+        dbc.Tab(
+            label="📝 Registrar Venda", 
+            tab_id="tab-registro",
+            active_tab_style={'backgroundColor': DARK_THEME['primary'], 'color': 'white', 'fontWeight': 'bold'},
+            tab_style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
+        ),
+        dbc.Tab(
+            label="📈 Análise Detalhada", 
+            tab_id="tab-analise",
+            active_tab_style={'backgroundColor': DARK_THEME['primary'], 'color': 'white', 'fontWeight': 'bold'},
+            tab_style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
+        ),
+        dbc.Tab(
+            label="💡 Estatísticas", 
+            tab_id="tab-estatisticas",
+            active_tab_style={'backgroundColor': DARK_THEME['primary'], 'color': 'white', 'fontWeight': 'bold'},
+            tab_style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
+        ),
+        dbc.Tab(
+            label="💰 Análise Contábil", 
+            tab_id="tab-contabil",
+            active_tab_style={'backgroundColor': DARK_THEME['primary'], 'color': 'white', 'fontWeight': 'bold'},
+            tab_style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
+        )
     ], id="tabs", active_tab="tab-registro", style={'backgroundColor': DARK_THEME['surface']}),
     
     html.Div(id='tab-content', className="mt-4")
@@ -370,7 +535,6 @@ app.layout = dbc.Container([
 
 # --- Callbacks ---
 
-# Callback para carregar dados iniciais
 @app.callback(
     Output('store-sales-data', 'data'),
     Input('interval-component', 'n_intervals')
@@ -385,7 +549,6 @@ def load_sales_data(n_intervals):
         print(f"❌ Erro ao carregar dados: {e}")
         return pd.DataFrame().to_json(date_format='iso', orient='split')
 
-# Callback para gerenciar conteúdo das tabs
 @app.callback(
     Output('tab-content', 'children'),
     [Input('tabs', 'active_tab'),
@@ -395,11 +558,11 @@ def render_tab_content(active_tab, sales_data):
     if active_tab == "tab-registro":
         return render_registro_tab(sales_data)
     elif active_tab == "tab-analise":
-        return render_analise_tab(sales_data)
+        return render_analise_tab()
     elif active_tab == "tab-estatisticas":
-        return render_estatisticas_tab(sales_data)
+        return render_estatisticas_tab()
     elif active_tab == "tab-contabil":
-        return render_contabil_tab(sales_data)
+        return render_contabil_tab()
     
     return html.Div("Selecione uma aba")
 
@@ -433,9 +596,9 @@ def render_registro_tab(sales_data):
             dbc.Card([
                 dbc.CardHeader([
                     html.H4("🔍 Filtros de Período", className="mb-0", style={'color': DARK_THEME['text']})
-                ]),
+                ], style={'backgroundColor': DARK_THEME['primary']}),
                 dbc.CardBody([
-                    html.Label("📅 Filtrar por Ano:", style={'color': DARK_THEME['text']}),
+                    html.Label("📅 Filtrar por Ano:", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
                     dcc.Dropdown(
                         id='filter-anos',
                         options=anos_options,
@@ -445,7 +608,7 @@ def render_registro_tab(sales_data):
                         style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
                     ),
                     html.Br(),
-                    html.Label("📆 Filtrar por Mês:", style={'color': DARK_THEME['text']}),
+                    html.Label("📆 Filtrar por Mês:", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
                     dcc.Dropdown(
                         id='filter-meses',
                         options=meses_options,
@@ -455,7 +618,7 @@ def render_registro_tab(sales_data):
                         style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
                     ),
                     html.Br(),
-                    html.Label("🔄 Últimos N dias:", style={'color': DARK_THEME['text']}),
+                    html.Label("🔄 Últimos N dias:", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
                     dcc.Dropdown(
                         id='filter-dias',
                         options=[
@@ -471,7 +634,7 @@ def render_registro_tab(sales_data):
                     ),
                     html.Hr(),
                     html.Div(id='filter-summary')
-                ])
+                ], style={'backgroundColor': DARK_THEME['card_bg']})
             ], style={'backgroundColor': DARK_THEME['card_bg']})
         ], width=3),
         
@@ -479,12 +642,12 @@ def render_registro_tab(sales_data):
             # Formulário de registro
             dbc.Card([
                 dbc.CardHeader([
-                    html.H4("💰 Registrar Nova Venda", className="mb-0", style={'color': DARK_THEME['text']})
-                ]),
+                    html.H4("💰 Registrar Nova Venda", className="mb-0", style={'color': 'white'})
+                ], style={'backgroundColor': DARK_THEME['primary']}),
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
-                            html.Label("📅 Data:", style={'color': DARK_THEME['text']}),
+                            html.Label("📅 Data:", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
                             dcc.DatePickerSingle(
                                 id='input-date',
                                 date=date.today(),
@@ -493,50 +656,76 @@ def render_registro_tab(sales_data):
                             )
                         ], width=12, md=3),
                         dbc.Col([
-                            html.Label("💳 Cartão (R$):", style={'color': DARK_THEME['text']}),
-                            dbc.Input(id='input-cartao', type='number', placeholder='0.00', min=0, step=0.01)
+                            html.Label("💳 Cartão (R$):", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
+                            dbc.Input(
+                                id='input-cartao', 
+                                type='number', 
+                                placeholder='0.00', 
+                                min=0, 
+                                step=0.01,
+                                style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
+                            )
                         ], width=12, md=3),
                         dbc.Col([
-                            html.Label("💵 Dinheiro (R$):", style={'color': DARK_THEME['text']}),
-                            dbc.Input(id='input-dinheiro', type='number', placeholder='0.00', min=0, step=0.01)
+                            html.Label("💵 Dinheiro (R$):", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
+                            dbc.Input(
+                                id='input-dinheiro', 
+                                type='number', 
+                                placeholder='0.00', 
+                                min=0, 
+                                step=0.01,
+                                style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
+                            )
                         ], width=12, md=3),
                         dbc.Col([
-                            html.Label("📱 Pix (R$):", style={'color': DARK_THEME['text']}),
-                            dbc.Input(id='input-pix', type='number', placeholder='0.00', min=0, step=0.01)
+                            html.Label("📱 Pix (R$):", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
+                            dbc.Input(
+                                id='input-pix', 
+                                type='number', 
+                                placeholder='0.00', 
+                                min=0, 
+                                step=0.01,
+                                style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']}
+                            )
                         ], width=12, md=3)
                     ], className="mb-3"),
                     
                     html.Div(id='total-preview', className="mb-3"),
                     
-                    dbc.Button("✅ Registrar Venda", id='submit-button', color="success", size="lg", className="w-100"),
+                    dbc.Button(
+                        "✅ Registrar Venda", 
+                        id='submit-button', 
+                        color="success", 
+                        size="lg", 
+                        className="w-100",
+                        style={'fontWeight': 'bold'}
+                    ),
                     html.Div(id='output-message', className="mt-3")
-                ])
+                ], style={'backgroundColor': DARK_THEME['card_bg']})
             ], style={'backgroundColor': DARK_THEME['card_bg']})
         ], width=9)
     ])
 
-def render_analise_tab(sales_data):
+def render_analise_tab():
     """Renderiza a tab de análise detalhada."""
     return [
         html.Div(id='analise-content'),
         dcc.Store(id='store-filtered-analise')
     ]
 
-def render_estatisticas_tab(sales_data):
+def render_estatisticas_tab():
     """Renderiza a tab de estatísticas."""
     return [
-        html.Div(id='estatisticas-content'),
-        dcc.Store(id='store-filtered-estatisticas')
+        html.Div(id='estatisticas-content')
     ]
 
-def render_contabil_tab(sales_data):
+def render_contabil_tab():
     """Renderiza a tab de análise contábil."""
     return [
-        html.Div(id='contabil-content'),
-        dcc.Store(id='store-filtered-contabil')
+        html.Div(id='contabil-content')
     ]
 
-# Callback para aplicar filtros - CORRIGIDO
+# Callback para aplicar filtros
 @app.callback(
     [Output('store-filtered-data', 'data'),
      Output('filter-summary', 'children')],
@@ -555,31 +744,24 @@ def apply_filters(data_json, selected_anos, selected_meses, selected_dias):
         
         df_filtered = df.copy()
         
-        # Debug
-        print(f"📊 Dados originais: {len(df)} registros")
-        print(f"🔍 Filtros - Anos: {selected_anos}, Meses: {selected_meses}, Dias: {selected_dias}")
-        
         # Aplicar filtros
         if selected_anos and 'Ano' in df_filtered.columns:
             df_filtered = df_filtered[df_filtered['Ano'].isin(selected_anos)]
-            print(f"📅 Após filtro de anos: {len(df_filtered)} registros")
         
         if selected_meses and 'Mês' in df_filtered.columns:
             df_filtered = df_filtered[df_filtered['Mês'].isin(selected_meses)]
-            print(f"📆 Após filtro de meses: {len(df_filtered)} registros")
         
         if selected_dias:
             df_filtered = filter_by_rolling_days(df_filtered, selected_dias)
-            print(f"🔄 Após filtro de dias: {len(df_filtered)} registros")
         
         # Resumo dos filtros
         total_registros = len(df_filtered)
         total_faturamento = df_filtered['Total'].sum() if not df_filtered.empty else 0
         
         summary = [
-            html.H6("📈 Resumo dos Filtros", style={'color': DARK_THEME['primary']}),
-            html.P(f"Registros: {total_registros}", style={'color': DARK_THEME['text']}),
-            html.P(f"Faturamento: {format_brl(total_faturamento)}", style={'color': DARK_THEME['text']})
+            html.H6("📈 Resumo dos Filtros", style={'color': DARK_THEME['primary'], 'fontWeight': 'bold'}),
+            html.P(f"📊 Registros: {total_registros}", style={'color': DARK_THEME['text']}),
+            html.P(f"💰 Faturamento: {format_brl(total_faturamento)}", style={'color': DARK_THEME['success'], 'fontWeight': 'bold'})
         ]
         
         return df_filtered.to_json(date_format='iso', orient='split'), summary
@@ -597,8 +779,17 @@ def apply_filters(data_json, selected_anos, selected_meses, selected_dias):
 )
 def update_total_preview(cartao, dinheiro, pix):
     total = (cartao or 0) + (dinheiro or 0) + (pix or 0)
-    return html.H5(f"💰 Total: {format_brl(total)}", 
-                   style={'color': DARK_THEME['success'] if total > 0 else DARK_THEME['text_secondary']})
+    return html.H5(
+        f"💰 Total: {format_brl(total)}", 
+        style={
+            'color': DARK_THEME['success'] if total > 0 else DARK_THEME['text_secondary'],
+            'textAlign': 'center',
+            'padding': '10px',
+            'backgroundColor': DARK_THEME['surface'],
+            'borderRadius': '10px',
+            'fontWeight': 'bold'
+        }
+    )
 
 # Callback para registrar venda
 @app.callback(
@@ -630,7 +821,7 @@ def submit_new_sale(n_clicks, date_val, cartao_val, dinheiro_val, pix_val):
     alert_message = dbc.Alert(message, color=alert_color, dismissable=True)
     
     if success:
-        return alert_message, None, None, None  # Limpa os campos
+        return alert_message, None, None, None
     else:
         return alert_message, dash.no_update, dash.no_update, dash.no_update
 
@@ -663,31 +854,31 @@ def update_analise_content(filtered_data):
                         html.H3(f"{format_brl(total_vendas)}", className="text-success"),
                         html.P("Total Vendas", className="text-muted")
                     ])
-                ], style={'backgroundColor': DARK_THEME['background']})
+                ], style={'backgroundColor': DARK_THEME['card_bg']})
             ], width=3),
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
-                        html.H3(f"{format_brl(vendas_hoje)}", className="text-info"),
+                        html.H3(f"{format_brl(vendas_hoje)}", style={'color': DARK_THEME['primary']}),
                         html.P("Vendas Hoje", className="text-muted")
                     ])
-                ], style={'backgroundColor': DARK_THEME['background']})
+                ], style={'backgroundColor': DARK_THEME['card_bg']})
             ], width=3),
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
-                        html.H3(f"{format_brl(media_diaria)}", className="text-warning"),
+                        html.H3(f"{format_brl(media_diaria)}", style={'color': DARK_THEME['warning']}),
                         html.P("Média Diária", className="text-muted")
                     ])
-                ], style={'backgroundColor': DARK_THEME['background']})
+                ], style={'backgroundColor': DARK_THEME['card_bg']})
             ], width=3),
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
-                        html.H3(f"{num_dias}", style={'color': DARK_THEME['primary']}),
+                        html.H3(f"{num_dias}", style={'color': DARK_THEME['secondary']}),
                         html.P("Dias com Vendas", className="text-muted")
                     ])
-                ], style={'backgroundColor': DARK_THEME['background']})
+                ], style={'backgroundColor': DARK_THEME['card_bg']})
             ], width=3)
         ])
         
@@ -695,17 +886,53 @@ def update_analise_content(filtered_data):
         daily_chart = create_daily_sales_chart(df)
         payment_chart = create_payment_method_chart(df)
         weekly_chart = create_weekly_pattern_chart(df)
+        accumulation_chart = create_accumulation_chart(df)
+        
+        # Tabela
+        table_data = df[['DataFormatada', 'DiaSemana', 'Cartão', 'Dinheiro', 'Pix', 'Total']].tail(15)
+        
+        table = dash_table.DataTable(
+            data=table_data.to_dict('records'),
+            columns=[
+                {'name': 'Data', 'id': 'DataFormatada'},
+                {'name': 'Dia', 'id': 'DiaSemana'},
+                {'name': 'Cartão (R$)', 'id': 'Cartão', 'type': 'numeric', 'format': {'specifier': ',.2f'}},
+                {'name': 'Dinheiro (R$)', 'id': 'Dinheiro', 'type': 'numeric', 'format': {'specifier': ',.2f'}},
+                {'name': 'Pix (R$)', 'id': 'Pix', 'type': 'numeric', 'format': {'specifier': ',.2f'}},
+                {'name': 'Total (R$)', 'id': 'Total', 'type': 'numeric', 'format': {'specifier': ',.2f'}}
+            ],
+            style_cell={
+                'textAlign': 'center', 
+                'backgroundColor': DARK_THEME['surface'], 
+                'color': DARK_THEME['text'],
+                'border': '1px solid #404040'
+            },
+            style_header={
+                'backgroundColor': DARK_THEME['primary'], 
+                'color': 'white', 
+                'fontWeight': 'bold'
+            },
+            style_data_conditional=[
+                {
+                    'if': {'row_index': 'odd'},
+                    'backgroundColor': DARK_THEME['background']
+                }
+            ],
+            page_size=10
+        )
         
         return [
             # Métricas principais
             dbc.Row([
                 dbc.Col([
                     dbc.Card([
+                        dbc.CardHeader([
+                            html.H4("📊 Resumo Financeiro", className="text-center mb-0", style={'color': 'white'})
+                        ], style={'backgroundColor': DARK_THEME['primary']}),
                         dbc.CardBody([
-                            html.H4("📊 Resumo Financeiro", className="text-center mb-3", style={'color': DARK_THEME['text']}),
                             metrics
-                        ])
-                    ], style={'backgroundColor': DARK_THEME['card_bg']})
+                        ], style={'backgroundColor': DARK_THEME['card_bg']})
+                    ])
                 ], width=12)
             ], className="mb-4"),
             
@@ -722,6 +949,23 @@ def update_analise_content(filtered_data):
             dbc.Row([
                 dbc.Col([
                     dcc.Graph(figure=weekly_chart)
+                ], width=12, lg=6),
+                dbc.Col([
+                    dcc.Graph(figure=accumulation_chart)
+                ], width=12, lg=6)
+            ], className="mb-4"),
+            
+            # Tabela
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.H4("📋 Histórico Detalhado", className="mb-0", style={'color': 'white'})
+                        ], style={'backgroundColor': DARK_THEME['primary']}),
+                        dbc.CardBody([
+                            table
+                        ], style={'backgroundColor': DARK_THEME['card_bg']})
+                    ])
                 ], width=12)
             ])
         ]
@@ -730,6 +974,245 @@ def update_analise_content(filtered_data):
         print(f"❌ Erro na análise: {e}")
         return html.Div(f"Erro ao processar dados: {e}", style={'color': DARK_THEME['danger']})
 
-if __name__ == '__main__':
-    print("🚀 Iniciando Clip's Burger Dashboard em Dash...")
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 8050)))
+# Callback para estatísticas
+@app.callback(
+    Output('estatisticas-content', 'children'),
+    Input('store-filtered-data', 'data')
+)
+def update_estatisticas_content(filtered_data):
+    if not filtered_data:
+        return html.Div("Carregando dados...", style={'color': DARK_THEME['text']})
+    
+    try:
+        df = pd.read_json(filtered_data, orient='split')
+        df['Data'] = pd.to_datetime(df['Data'])
+        
+        if df.empty:
+            return html.Div("Nenhum dado corresponde aos filtros selecionados.", style={'color': DARK_THEME['text']})
+        
+        # Estatísticas avançadas
+        total_vendas = df['Total'].sum()
+        cartao_pct = (df['Cartão'].sum() / total_vendas * 100) if total_vendas > 0 else 0
+        dinheiro_pct = (df['Dinheiro'].sum() / total_vendas * 100) if total_vendas > 0 else 0
+        pix_pct = (df['Pix'].sum() / total_vendas * 100) if total_vendas > 0 else 0
+        
+        # Melhor dia da semana
+        best_weekday, avg_sales_weekday = analyze_sales_by_weekday(df)
+        
+        # Resumo financeiro
+        total_registros = len(df)
+        media_por_registro = df['Total'].mean() if total_registros > 0 else 0
+        maior_venda_diaria = df['Total'].max() if total_registros > 0 else 0
+        menor_venda_diaria = df[df['Total'] > 0]['Total'].min() if not df[df['Total'] > 0].empty else 0
+        
+        stats_content = [
+            # Resumo Financeiro
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.H4("💰 Resumo Financeiro Agregado", style={'color': 'white', 'marginBottom': '0'})
+                        ], style={'backgroundColor': DARK_THEME['primary']}),
+                        dbc.CardBody([
+                            dbc.Row([
+                                dbc.Col([
+                                    html.H5("🔢 Total de Registros", style={'color': DARK_THEME['text']}),
+                                    html.H3(f"{total_registros}", style={'color': DARK_THEME['success']})
+                                ], width=6),
+                                dbc.Col([
+                                    html.H5("💵 Faturamento Total", style={'color': DARK_THEME['text']}),
+                                    html.H3(format_brl(total_vendas), style={'color': DARK_THEME['success']})
+                                ], width=6)
+                            ]),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.H5("📈 Média por Registro", style={'color': DARK_THEME['text']}),
+                                    html.H3(format_brl(media_por_registro), style={'color': DARK_THEME['primary']})
+                                ], width=6),
+                                dbc.Col([
+                                    html.H5("⬆️ Maior Venda Diária", style={'color': DARK_THEME['text']}),
+                                    html.H3(format_brl(maior_venda_diaria), style={'color': DARK_THEME['warning']})
+                                ], width=6)
+                            ]),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.H5("⬇️ Menor Venda Diária (>0)", style={'color': DARK_THEME['text']}),
+                                    html.H3(format_brl(menor_venda_diaria), style={'color': DARK_THEME['secondary']})
+                                ], width=12)
+                            ])
+                        ], style={'backgroundColor': DARK_THEME['card_bg']})
+                    ])
+                ], width=12)
+            ], className="mb-4"),
+            
+            # Métodos de Pagamento
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.H4("💳 Métodos de Pagamento (Visão Geral)", style={'color': 'white', 'marginBottom': '0'})
+                        ], style={'backgroundColor': DARK_THEME['primary']}),
+                        dbc.CardBody([
+                            dbc.Row([
+                                dbc.Col([
+                                    html.H5("💳 Cartão", style={'color': DARK_THEME['text']}),
+                                    html.H3(format_brl(df['Cartão'].sum()), style={'color': DARK_THEME['primary']}),
+                                    html.P(f"{cartao_pct:.1f}% do total", style={'color': DARK_THEME['text_secondary']})
+                                ], width=4),
+                                dbc.Col([
+                                    html.H5("💵 Dinheiro", style={'color': DARK_THEME['text']}),
+                                    html.H3(format_brl(df['Dinheiro'].sum()), style={'color': DARK_THEME['success']}),
+                                    html.P(f"{dinheiro_pct:.1f}% do total", style={'color': DARK_THEME['text_secondary']})
+                                ], width=4),
+                                dbc.Col([
+                                    html.H5("📱 PIX", style={'color': DARK_THEME['text']}),
+                                    html.H3(format_brl(df['Pix'].sum()), style={'color': DARK_THEME['warning']}),
+                                    html.P(f"{pix_pct:.1f}% do total", style={'color': DARK_THEME['text_secondary']})
+                                ], width=4)
+                            ])
+                        ], style={'backgroundColor': DARK_THEME['card_bg']})
+                    ])
+                ], width=12)
+            ], className="mb-4"),
+            
+            # Análise Temporal
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.H4("📅 Análise Temporal e Desempenho Semanal", style={'color': 'white', 'marginBottom': '0'})
+                        ], style={'backgroundColor': DARK_THEME['primary']}),
+                        dbc.CardBody([
+                            html.H5(f"🏆 Melhor Dia da Semana: {best_weekday or 'N/A'}", 
+                                   style={'color': DARK_THEME['success'], 'marginBottom': '20px'}) if best_weekday else 
+                            html.P("📊 Dados insuficientes para determinar o melhor dia", style={'color': DARK_THEME['text_secondary']})
+                        ], style={'backgroundColor': DARK_THEME['card_bg']})
+                    ])
+                ], width=12)
+            ], className="mb-4")
+        ]
+        
+        # Gráficos
+        if avg_sales_weekday is not None and not avg_sales_weekday.empty:
+            weekly_chart = create_weekly_pattern_chart(df)
+            stats_content.append(
+                dbc.Row([
+                    dbc.Col([
+                        dcc.Graph(figure=weekly_chart)
+                    ], width=12)
+                ], className="mb-4")
+            )
+        
+        evolution_chart = create_payment_evolution_chart(df)
+        histogram_chart = create_sales_histogram(df)
+        
+        stats_content.extend([
+            dbc.Row([
+                dbc.Col([
+                    dcc.Graph(figure=evolution_chart)
+                ], width=12, lg=6),
+                dbc.Col([
+                    dcc.Graph(figure=histogram_chart)
+                ], width=12, lg=6)
+            ])
+        ])
+        
+        return stats_content
+        
+    except Exception as e:
+        print(f"❌ Erro nas estatísticas: {e}")
+        return html.Div(f"Erro ao processar dados: {e}", style={'color': DARK_THEME['danger']})
+
+# Callback para análise contábil
+@app.callback(
+    Output('contabil-content', 'children'),
+    Input('store-filtered-data', 'data')
+)
+def update_contabil_content(filtered_data):
+    if not filtered_data:
+        return html.Div("Carregando dados...", style={'color': DARK_THEME['text']})
+    
+    try:
+        df = pd.read_json(filtered_data, orient='split')
+        
+        if df.empty:
+            return html.Div("Nenhum dado corresponde aos filtros selecionados.", style={'color': DARK_THEME['text']})
+        
+        return [
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.H4("📊 Análise Contábil e Financeira Detalhada", className="mb-0", style={'color': 'white'})
+                        ], style={'backgroundColor': DARK_THEME['primary']}),
+                        dbc.CardBody([
+                            html.P("Configure os parâmetros para simulação contábil:", style={'color': DARK_THEME['text_secondary']}),
+                            
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Label("💼 Salário Base (R$):", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
+                                    dbc.Input(id='salario-input', type='number', value=1550, min=0, step=0.01,
+                                             style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']})
+                                ], width=4),
+                                dbc.Col([
+                                    html.Label("📋 Honorários Contábeis (R$):", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
+                                    dbc.Input(id='contadora-input', type='number', value=316, min=0, step=0.01,
+                                             style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']})
+                                ], width=4),
+                                dbc.Col([
+                                    html.Label("📦 Custo Produtos (%):", style={'color': DARK_THEME['text'], 'fontWeight': 'bold'}),
+                                    dbc.Input(id='fornecedores-input', type='number', value=30, min=0, max=100, step=0.1,
+                                             style={'backgroundColor': DARK_THEME['surface'], 'color': DARK_THEME['text']})
+                                ], width=4)
+                            ], className="mb-3"),
+                            
+                            html.Div(id='contabil-results')
+                        ], style={'backgroundColor': DARK_THEME['card_bg']})
+                    ])
+                ], width=12)
+            ])
+        ]
+        
+    except Exception as e:
+        print(f"❌ Erro na análise contábil: {e}")
+        return html.Div(f"Erro ao processar dados: {e}", style={'color': DARK_THEME['danger']})
+
+# Callback para cálculos contábeis
+@app.callback(
+    Output('contabil-results', 'children'),
+    [Input('store-filtered-data', 'data'),
+     Input('salario-input', 'value'),
+     Input('contadora-input', 'value'),
+     Input('fornecedores-input', 'value')]
+)
+def update_contabil_results(filtered_data, salario, contadora, fornecedores):
+    if not filtered_data:
+        return "Carregando dados..."
+    
+    try:
+        df = pd.read_json(filtered_data, orient='split')
+        
+        if df.empty:
+            return "Sem dados para análise contábil"
+        
+        # Calcular resultados
+        results = calculate_financial_results(df, salario or 1550, contadora or 316, fornecedores or 30)
+        
+        return [
+            # DRE Simplificado
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.H5("💰 Demonstrativo de Resultados", style={'color': 'white', 'marginBottom': '0'})
+                        ], style={'backgroundColor': DARK_THEME['primary']}),
+                        dbc.CardBody([
+                            html.Table([
+                                html.Tr([html.Td("(+) Faturamento Bruto", style={'color': DARK_THEME['text']}), 
+                                       html.Td(format_brl(results['faturamento_bruto']), style={'color': DARK_THEME['success'], 'textAlign': 'right'})]),
+                                html.Tr([html.Td("(-) Impostos Simples Nacional", style={'color': DARK_THEME['text']}), 
+                                       html.Td(format_brl(-results['imposto_simples']), style={'color': DARK_THEME['danger'], 'textAlign': 'right'})]),
+                                html.Tr([html.Td("(-) Custo dos Produtos", style={'color': DARK_THEME['text']}), 
+                                       html.Td(format_brl(-results['custo_fornecedores_valor']), style={'color': DARK_THEME['danger'], 'textAlign': 'right'})]),
+                                html.Tr([html.Td("(-) Folha de Pagamento", style={'color': DARK_THEME['text']}), 
+                                       html.Td(format_
