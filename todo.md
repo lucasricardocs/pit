@@ -1,0 +1,23 @@
+## Lista de Tarefas - Transformação Streamlit para Dash
+
+- [x] 1. Analisar código Streamlit existente (concluído)
+- [x] 2. Planejar estrutura do aplicativo Dash (concluído)
+- [x] 3. Configurar ambiente e dependências do Dash
+- [x] 4. Adaptar autenticação do Google Sheets (sem st.secrets)
+- [x] 5. Implementar layout básico do Dash (título, logo, seções)
+- [x] 6. Implementar seção de entrada de dados (formulário)
+- [x] 7. Implementar callback para adicionar dados ao Google Sheets
+- [x] 8. Adaptar funções de leitura e processamento de dados
+- [ ] 9. Implementar filtros (intervalo de datas, dias corridos)
+- [ ] 10. Converter gráfico de evolução de pagamento (Altair -> Plotly)
+- [ ] 11. Converter histograma de vendas (Altair -> Plotly)
+- [ ] 12. Converter gráfico de capital acumulado (Altair -> Plotly)
+- [ ] 13. Implementar visualização de análise por dia da semana (ex: gráfico de barras Plotly)
+- [ ] 14. Implementar seção de cálculos financeiros e exibição de métricas
+- [ ] 15. Implementar callbacks para atualizar gráficos e métricas com base nos filtros e novos dados
+- [ ] 16. Implementar exibição da tabela de dados (`dash_table.DataTable`)
+- [ ] 17. Estilizar o aplicativo (ex: usando Dash Bootstrap Components)
+- [ ] 18. Validar funcionalidade completa do aplicativo Dash
+- [x] 19. Criar arquivo `requirements.txt` (Done)
+- [ ] 20. Preparar instruções de execução (incluindo configuração de credenciais)
+- [ ] 21. Enviar arquivos finais ao usuário
